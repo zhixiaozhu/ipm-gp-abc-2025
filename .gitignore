@@ -1,0 +1,14 @@
+.DS_Store
+
+__pycache__/
+ABC_details/
+IPM_matrix/
+Marginal/
+mcmc_samples/
+true_popu/
+
+sandbox/
+outputs/
+.ipynb_checkpoints/
+release_archives/
+
