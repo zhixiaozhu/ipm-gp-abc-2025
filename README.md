@@ -1,5 +1,5 @@
 **This repository contains the full codebase used in the manuscript:
-"Population-informed Joint Calibration of Vital Rates in IPMs via Gaussian Processes and ABC"**
+"Population-informed calibration of Integral Projection Models using Gaussian Processes and Approximate Bayesian Computation"**
 
 It includes two components:
 
@@ -17,9 +17,14 @@ as downstream ABC components rely on MCMC output and selected statistics.
 
 The Gaussian process code relies on GPflow, together with TensorFlow and TensorFlow-Probability; the GLM baselines use PyMC and Bambi; and parallel computation for the ABC sampler is implemented using Ray.
 
+## Installation
+
+The code requires Python 3.11 and the packages listed, with their versions, in [`requirements.txt`](requirements.txt). If you have not used Python before, step-by-step instructions for setting this up and running the vignette are given in [`INSTALL.md`](INSTALL.md).
+
+
 ## Demo
 
-For a minimal end-to-end example on a small synthetic dataset, open [`toy_example/vignette.ipynb`](toy_example/vignette.ipynb). It runs in about a minute and needs none of the large cached files. The notebook walks through each step of this study in turn, showing the actual code and pointing to the files in both case studies that implement it.
+For a minimal end-to-end example on a small synthetic dataset, open [`toy_example/vignette.ipynb`](toy_example/vignette.ipynb). It runs in about three minutes and needs none of the large cached files. The notebook walks through each step of this study in turn, showing the actual code and pointing to the files in both case studies that implement it.
 
 ## Precomputed results
 
@@ -138,6 +143,22 @@ This folder implements the full workflow for summary statistic selection and eva
   - `r6_ acceptance_compare.ipynb` – Performance comparisons (note the space in the file name)  
   - `r6_ acceptance_compare_testyears.ipynb` – Long-term forecasting comparison restricted to the testing years (2009-2012), starting from the observed 2008 population structure (note the space in the file name)  
   - `r7_efficiency.ipynb` – Efficiency evaluation of ABC samplers
+
+
+---
+
+## Using the method with your own data
+
+This repository reproduces the analyses in the paper. To apply the method to other species and datasets, we recommend the Python package `ABC_GP_IPM` (Zhu et al., 2026, [https://doi.org/10.64898/2026.01.08.698488](https://doi.org/10.64898/2026.01.08.698488)), which comes with a user guide and a worked case study on Soay sheep (*Ovis aries*).
+
+To adapt the code in this repository instead, the main parts to change are:
+
+- **The data for each vital rate:** the `XY_*_compu` functions in `simulation_case_study/s0_fun_base.py`, which prepare the predictors (X) and response (Y) used to fit each vital rate model.
+- **The GP model of each vital rate** (kernel, likelihood, priors and covariates): the fitting scripts in `simulation_case_study/s0_gp_MCMC/`.
+- **The summary statistics:** the candidate summary statistics in `list_comparisons` and the selected set in `list_comparisons_interested` (`simulation_case_study/s0_fun_ss.py`), chosen with Workflow 1 (`simulation_case_study/s1_ss_selection/`).
+- **The life cycle of the species:** the individual-based model (IBM) in `simulation_case_study/s0_fun_IBMs.py` (`IBM_1step_gp` and its cached version `IBM_1step_gp_cache`), including the order of the life cycle events and the recruitment parameters.
+
+The vignette (`toy_example/vignette.ipynb`) shows where each of these parts enters the workflow.
 
 
 ---
