@@ -1,8 +1,10 @@
-"""Helper functions for toy_example/vignette_new.ipynb.
+"""Helper functions for toy_example/vignette.ipynb.
 
 The code below was moved out of the notebook without changing it, so that the
 notebook stays short. 
 """
+
+# import packages
 import contextlib
 import io
 import logging
@@ -11,17 +13,36 @@ import pickle
 import sys
 import types
 import warnings
-
 import numpy as np
+import gpflow
+import matplotlib.pyplot as plt
+import pandas as pd
+import tensorflow as tf
+import tensorflow_probability as tfp
+from scipy import stats
+from sklearn.metrics import roc_curve, auc
+from tensorflow_probability import distributions as tfd
+from IPython import get_ipython
 
+
+# setup paths
 HERE = os.path.dirname(os.path.abspath(__file__)) # toy_example/
 REPO = os.path.dirname(HERE) # repository root
 SIM = os.path.join(REPO, "simulation_case_study") # the analysis code
 TOY_DATA = os.path.join(HERE, "toy_data") # the toy dataset
 SANDBOX = os.path.join(HERE, "sandbox")  # files written by the notebook
+TP = "true_popu/glm_mle_true_population" # the directory the real anlysis code expects under its working directory
 
-# the directory the real code expects under its working directory
-TP = "true_popu/glm_mle_true_population"
+# import packages and functions
+sys.path.insert(0, SIM) # make the code in simulation_case_study/ importable (the s0_*.py files)
+from s0_class_ABCPMC import ipmmcmc_whole
+from s0_class_GP_IPM import Perted_IPM
+from s0_fun_base import (XY_sur_compu, XY_fec_compu, XY_flow_compu,
+                         XY_grw_f_compu, XY_grw_nf_compu, XY_grw_compu)
+from s0_fun_IBMs import GPMC_posterior, IBM_1step_gp, IBM_1step_gp_cache, popu_structure
+from s0_fun_IPMs import kernel_setting
+from s0_fun_ss import list_comparisons_interested
+
 
 
 # --Setup---------------------------------------------------------------
@@ -31,19 +52,16 @@ def setup():
     warnings.filterwarnings("ignore")
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
     logging.getLogger("tensorflow").setLevel(logging.ERROR)
-    sys.path.insert(0, SIM)  # so `import s0_fun_base` finds the real code
     for sub in ([TP, TP + "/MCMC/gp/sep", TP + "/MCMC/gp/nonsep"]
                 + [f"true_popu/mcmc/Lm/glm/{r}" for r in ["sur","grw_f","grw_nf","grw","fec","flow"]]
                 + ["ABC_details/glmsep"]):
         os.makedirs(os.path.join(SANDBOX, sub), exist_ok=True)
     os.chdir(SANDBOX)
     try:   # sharper figures in Jupyter: same size on screen, twice the pixels
-        from IPython import get_ipython
         get_ipython().run_line_magic("config", "InlineBackend.figure_format = 'retina'")
     except Exception:
         pass
     print("Setup done: the notebook now reads and writes files in toy_example/sandbox/.")
-
 
 # --Step 0--------------------------------------------------------------
 
@@ -65,7 +83,6 @@ def load_toy_data(N_ROWS=200, SEED=0):
 
 def run_mcmc(model, step_size, N_DRAWS, N_BURNIN, N_LEAPFROG):
     "Sample the GP hyperparameters (and latent values, for GPMC) by MCMC (HMC)."
-    import gpflow, tensorflow as tf, tensorflow_probability as tfp
     tf.get_logger().setLevel("ERROR")
     f64 = gpflow.utilities.to_default_float
     hmc_helper = gpflow.optimizers.SamplingHelper(
@@ -84,10 +101,7 @@ def run_mcmc(model, step_size, N_DRAWS, N_BURNIN, N_LEAPFROG):
             trace_fn=lambda _, pkr: pkr.inner_results.is_accepted)
     return run()[0]
 
-
 def make_gpmc(data, likelihood, prior_scale):
-    import gpflow
-    from tensorflow_probability import distributions as tfd
     f64 = gpflow.utilities.to_default_float
     m = gpflow.models.GPMC(data=data, kernel=gpflow.kernels.RBF(), likelihood=likelihood)
     m.kernel.variance.prior = tfd.HalfNormal(f64(prior_scale))
@@ -96,8 +110,6 @@ def make_gpmc(data, likelihood, prior_scale):
 
 
 def make_gpr(data):
-    import gpflow
-    from tensorflow_probability import distributions as tfd
     f64 = gpflow.utilities.to_default_float
     m = gpflow.models.GPR(data=data, kernel=gpflow.kernels.RBF())
     m.kernel.lengthscales.prior = tfd.HalfNormal(f64(100.))
@@ -106,14 +118,12 @@ def make_gpr(data):
     return m
 
 
+
 def fit_other_gps(toy, samples_sur, N_DRAWS, N_BURNIN, N_LEAPFROG):
     """The remaining five vital rates, same pattern as survival.
 
     Returns {vital rate: (model, MCMC draws)}, used for plotting.
     """
-    import gpflow
-    from s0_fun_base import (XY_fec_compu, XY_flow_compu, XY_grw_f_compu,
-                             XY_grw_nf_compu, XY_grw_compu)
     fits = {}
     RATES = [ # name, kind, XY builder, prior scale, step size, sep/nonsep folder
         ("fec", "bern", XY_fec_compu, 100., 1.0, "sep"),
@@ -135,14 +145,10 @@ def fit_other_gps(toy, samples_sur, N_DRAWS, N_BURNIN, N_LEAPFROG):
     print("all vital rate fitted by MCMC and saved.")
     return fits
 
-
 # --Step 2--------------------------------------------------------------
 
 def mle_models(popu, alpha, beta, recruit_p):
     """Maximum-likelihood GP fit of each vital rate (as in s0_preprocess.ipynb)."""
-    import gpflow
-    from s0_fun_base import (XY_sur_compu, XY_fec_compu, XY_flow_compu,
-                             XY_grw_f_compu, XY_grw_nf_compu)
     def mle_vgp(xy, likelihood):
         X, Y = xy(popu)
         m = gpflow.models.VGP((X, Y), kernel=gpflow.kernels.RBF(), likelihood=likelihood)
@@ -160,10 +166,8 @@ def mle_models(popu, alpha, beta, recruit_p):
             'm_grw_nf': mle_gpr(XY_grw_nf_compu),
             'alpha': alpha, 'beta': beta, 'recruit_p': recruit_p}
 
-
 def nlpp_of_draws(model, samples):
     """NLPP (negative log posterior probability) of each MCMC draw, and the draws on the constrained scale."""
-    import gpflow
     hmc_helper = gpflow.optimizers.SamplingHelper(model.log_posterior_density, model.trainable_parameters)
     constrained_samples = hmc_helper.convert_to_constrained_values(samples)
     nlpp = []
@@ -176,7 +180,6 @@ def nlpp_of_draws(model, samples):
 
 def perturbed_ipm(popu, models_mle, target_model, constrained_samples, nlpp, near_percentage):
     """The analysis code's Perted_IPM object, with the fixed settings of this example (sep growth, D_glm)."""
-    from s0_class_GP_IPM import Perted_IPM
     return Perted_IPM(popu_data=popu, GPmodel_true=models_mle, grw_setting='sep', target=target_model,
                       truedata_style='glm', mcmc_para_sample=constrained_samples,
                       nlog_post=nlpp, opt_percentage=near_percentage)
@@ -190,12 +193,9 @@ def model_set(ipm_pert, target_model, constrained_samples, i):
     return ipm_pert.build_models(m)
 
 
+
 def discrepancies(models_1, models_2, seed, rep=100):
     """Simulate rep pairs of datasets (one from each model set) and compute the summary statistics of each pair."""
-    import pandas as pd
-    from s0_fun_IBMs import IBM_1step_gp
-    from s0_fun_IPMs import kernel_setting
-    from s0_fun_ss import list_comparisons_interested
     a = kernel_setting(m_size=100, lower=0, upper=5)
     full_data = pd.DataFrame({'size': a[0], 'age': np.repeat(1, len(a[0]))})   # complete dataset for one-step projection
     np.random.seed(seed)
@@ -210,8 +210,6 @@ def discrepancies(models_1, models_2, seed, rep=100):
 
 def auc_table(s_ref, s_near):
     """AUC of each statistic for 'theta_opt vs theta_k' against the baseline 'theta_opt vs theta_opt'."""
-    import pandas as pd
-    from sklearn.metrics import roc_curve, auc
     rep = s_ref.shape[0]   # number of simulated pairs per model
     return pd.DataFrame(
         {f"theta_k = draw {k}": [auc(*roc_curve(np.r_[np.ones(rep), np.zeros(rep)],
@@ -220,15 +218,12 @@ def auc_table(s_ref, s_near):
          for k in s_near}, index=[f"statistic ({j + 1})" for j in range(s_ref.shape[1])]).T
 
 
+
+
 # --Step 3--------------------------------------------------------------
 
 def build_whole(popu, ALPHA, BETA, RECRUIT_P):
     "Attach the GP models + MCMC draws to an ipmmcmc_whole (as s1_cache_produce.py / s2_ABCSMC_sep.py do)."
-    import gpflow
-    from s0_class_ABCPMC import ipmmcmc_whole
-    from s0_fun_IBMs import popu_structure
-    from s0_fun_base import (XY_sur_compu, XY_fec_compu, XY_flow_compu,
-                             XY_grw_f_compu, XY_grw_nf_compu, XY_grw_compu)
     wy = ipmmcmc_whole(popu_data=popu, grw_setting="sep", z0=popu_structure(popu),
                        truedata_style="glm", alpha=ALPHA, beta=BETA, recruit_p=RECRUIT_P)
     def gpmc(xy, ks, lik):
@@ -250,10 +245,8 @@ def build_whole(popu, ALPHA, BETA, RECRUIT_P):
     wy.rep = 1
     return wy
 
-
 def cache_gp_posteriors(wy, N_DRAWS, ALPHA, BETA, RECRUIT_P):
     """Precompute and store the GP posterior cache for every MCMC draw, then check it."""
-    from s0_fun_IBMs import GPMC_posterior, IBM_1step_gp, IBM_1step_gp_cache
     LM = "true_popu/mcmc/Lm/glm"
     with contextlib.redirect_stdout(io.StringIO()): # silence the internal "cache only" message
         for i in range(N_DRAWS):
@@ -282,7 +275,6 @@ def cache_gp_posteriors(wy, N_DRAWS, ALPHA, BETA, RECRUIT_P):
 
 def prepare_toy_abc(wy, ABC_BATCH, N_DRAWS):
     """Run the ABC sampler in series and perturb within the toy's cache range (no source file is changed)."""
-    from s0_fun_ss import list_comparisons_interested  # (used inside IPM_whole_givenindex)
 
     def _serial(self, total_samples, given_theta=False, given_weight=False, random=True):
         out = []
@@ -301,7 +293,6 @@ def prepare_toy_abc(wy, ABC_BATCH, N_DRAWS):
     wy.random_IPM_whole_para = types.MethodType(_serial, wy)
     wy.random_IPM_ABC_weight = types.MethodType(_perturb, wy)
 
-
 def load_abc_round(c):
     """Read what ABC_SMC saved for round c (details=True)."""
     path = lambda f: f"ABC_details/glmsep/{f}{c}.pkl"
@@ -314,7 +305,6 @@ def load_abc_round(c):
 
 def gp_curves(model, draws, grid):
     """Predicted mean of a fitted GP on `grid`, one row per MCMC draw."""
-    import gpflow
     helper = gpflow.optimizers.SamplingHelper(model.log_posterior_density,
                                               model.trainable_parameters)
     curves = []
@@ -325,11 +315,9 @@ def gp_curves(model, draws, grid):
         curves.append(mean.numpy().ravel())
     return np.array(curves)
 
-
 def plot_data(toy, alpha, beta, fits=None):
     """Plot datasets each vital rate is fitted to, and the recruit sizes.
     """
-    import matplotlib.pyplot as plt
     small_fonts = {"font.size": 7.5, "axes.titlesize": 8, "axes.labelsize": 7.5,
                    "xtick.labelsize": 7, "ytick.labelsize": 7}
     with plt.rc_context(small_fonts):   # the figure is 75% of its original size, so the fonts are smaller too
@@ -337,10 +325,6 @@ def plot_data(toy, alpha, beta, fits=None):
 
 
 def _plot_data(toy, alpha, beta, fits=None):
-    import matplotlib.pyplot as plt
-    from scipy import stats
-    from s0_fun_base import (XY_sur_compu, XY_fec_compu, XY_flow_compu,
-                             XY_grw_f_compu, XY_grw_nf_compu)
 
     rng = np.random.default_rng(0)
     jitter = lambda n: rng.uniform(-0.04, 0.04, n) 
@@ -392,10 +376,8 @@ def _plot_data(toy, alpha, beta, fits=None):
     fig.tight_layout()
     plt.show()
 
-
 def plot_nlpp(nlpp, ref, near):
     """NLPP of each MCMC draw, sorted, with theta_opt and the perturbed models marked."""
-    import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(5, 3))
     order = np.argsort(nlpp)
     colors = ["C3" if i == ref else ("C1" if i in near else "0.7") for i in order]
@@ -409,7 +391,6 @@ def plot_nlpp(nlpp, ref, near):
 
 def plot_abc_rounds(n_rounds):
     """Discrepancies: round 0 candidates versus accepted particles."""
-    import matplotlib.pyplot as plt
     r = [load_abc_round(c) for c in range(n_rounds)]
     dist = lambda s, mad: np.sqrt(np.sum((s / mad) ** 2, axis=1))
     fig, ax = plt.subplots(figsize=(5.5, 3.4))
@@ -431,7 +412,6 @@ def plot_abc_rounds(n_rounds):
 
 def plot_lambdas(lam):
     """Histogram of lambda for particles drawn according to their ABC weights."""
-    import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.hist(lam, bins=15, alpha=0.7)
     ax.set_xlabel("population growth rate $\\lambda$"); ax.set_ylabel("number of draws")
